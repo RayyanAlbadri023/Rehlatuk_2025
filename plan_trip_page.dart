@@ -34,7 +34,7 @@ class _PlanTripPageState extends State<PlanTripPage> {
     setState(() => _selectedIndex = index);
     switch (index) {
       case 0:
-        Navigator.pushNamed(context, "/home");
+        Navigator.pushNamed(context, "/HomePage");
         break;
       case 1:
         Navigator.pushNamed(context, "/chatbot");
@@ -61,7 +61,7 @@ class _PlanTripPageState extends State<PlanTripPage> {
         children: [
           Positioned.fill(
             child: Image.asset(
-              "assets/images/car.jpg",
+              "assets/car.jpg",
               fit: BoxFit.cover,
             ),
           ),

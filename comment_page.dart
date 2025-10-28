@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'user_data.dart';
 
 class CommentPage extends StatefulWidget {
   final String placeName;
-  final List<Map<String, String>>? initialComments;
+  final String locale;
 
-  const CommentPage({super.key, required this.placeName, this.initialComments});
+  const CommentPage({super.key, required this.placeName, required this.locale});
 
   @override
   State<CommentPage> createState() => _CommentPageState();
@@ -13,53 +15,84 @@ class CommentPage extends StatefulWidget {
 class _CommentPageState extends State<CommentPage> {
   double _rating = 0;
   final TextEditingController _commentController = TextEditingController();
-  late List<Map<String, String>> comments;
+
+  // للحصول على التعليقات من Firestore
+  late CollectionReference commentsCollection;
 
   @override
   void initState() {
     super.initState();
-    comments = widget.initialComments ?? [];
+    // كل مكان له مجموعة خاصة باسمه داخل collection "destinations"
+    commentsCollection = FirebaseFirestore.instance
+        .collection('destinations')
+        .doc(widget.placeName)
+        .collection('comments');
   }
 
-  void _submitComment() {
-    if (_commentController.text.trim().isEmpty) return;
+  Future<void> _submitComment() async {
+    final commentText = _commentController.text.trim();
+    if (commentText.isEmpty) return;
 
-    setState(() {
-      comments.add({
-        "name": "You", // Replace with real user name if available
-        "profile": "assets/images/user.png", // default user image
-        "text": _commentController.text.trim(),
-      });
+    final user = userDataNotifier.value;
+
+    final commentData = {
+      'name': user.name.isNotEmpty ? user.name : "Anonymous",
+      'profile': user.profileImagePath ?? "",
+      'text': commentText,
+      'rating': _rating,
+      'timestamp': FieldValue.serverTimestamp(),
+    };
+
+    try {
+      await commentsCollection.add(commentData);
+
       _commentController.clear();
-    });
+      setState(() {
+        _rating = 0;
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Your comment has been posted")),
-    );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Your comment has been posted")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to post comment")),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final containerColor = isDark ? const Color(0xFF160948) : Colors.white;
+    final buttonTextColor = isDark ? Colors.white : const Color(0xFF160948);
+
     return Scaffold(
       body: Stack(
         children: [
-          // Background car image
+          // Background image
           Container(
             decoration: const BoxDecoration(
               image: DecorationImage(
-                image: AssetImage("assets/images/car.jpg"),
+                image: AssetImage("assets/car.jpg"),
                 fit: BoxFit.cover,
               ),
             ),
           ),
-          // Rounded overlay container
           Align(
             alignment: Alignment.bottomCenter,
             child: Container(
               height: MediaQuery.of(context).size.height * 0.78,
-              decoration: const BoxDecoration(
-                color: Color(0xFF160948),
-                borderRadius: BorderRadius.only(
+              decoration: BoxDecoration(
+                color: containerColor,
+                borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(25),
                   topRight: Radius.circular(25),
                 ),
@@ -68,70 +101,80 @@ class _CommentPageState extends State<CommentPage> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    // Header
                     Text(
                       "Comments for ${widget.placeName}",
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: buttonTextColor,
                           fontSize: 20,
                           fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 15),
-
-                    // Interaction box for rating message
-                    if (_rating > 0)
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        margin: const EdgeInsets.only(bottom: 15),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade200.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          "You rated ${widget.placeName} ${_rating.toInt()} stars",
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-
-                    // Comments list
+                    // StreamBuilder لجلب التعليقات مباشرة من Firestore
                     Expanded(
-                      child: comments.isEmpty
-                          ? const Center(
-                        child: Text(
-                          "No comments yet!",
-                          style: TextStyle(color: Colors.white70, fontSize: 16),
-                        ),
-                      )
-                          : ListView.separated(
-                        itemCount: comments.length,
-                        separatorBuilder: (_, __) => const Divider(
-                          color: Colors.white,
-                          thickness: 0.5,
-                        ),
-                        itemBuilder: (context, index) {
-                          final comment = comments[index];
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundImage: AssetImage(
-                                  comment["profile"] ?? "assets/images/user.png"),
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: commentsCollection
+                            .orderBy('timestamp', descending: true)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                            return Center(
+                              child: Text(
+                                "No comments yet!",
+                                style: TextStyle(color: buttonTextColor, fontSize: 16),
+                              ),
+                            );
+                          }
+                          final docs = snapshot.data!.docs;
+                          return ListView.separated(
+                            itemCount: docs.length,
+                            separatorBuilder: (_, __) => Divider(
+                              color: buttonTextColor,
+                              thickness: 0.5,
                             ),
-                            title: Text(
-                              comment["name"] ?? "Unknown",
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold),
-                            ),
-                            subtitle: Text(
-                              comment["text"] ?? "",
-                              style: const TextStyle(color: Colors.white70),
-                            ),
+                            itemBuilder: (context, index) {
+                              final data = docs[index].data() as Map<String, dynamic>;
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundImage: data['profile'] != ""
+                                      ? NetworkImage(data['profile'])
+                                      : const AssetImage("assets/user.png")
+                                  as ImageProvider,
+                                ),
+                                title: Text(
+                                  data['name'] ?? "Unknown",
+                                  style: TextStyle(
+                                      color: buttonTextColor,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      data['text'] ?? "",
+                                      style: TextStyle(color: buttonTextColor),
+                                    ),
+                                    if (data['rating'] != null)
+                                      Row(
+                                        children: List.generate(5, (i) {
+                                          return Icon(
+                                            i < data['rating'] ? Icons.star : Icons.star_border,
+                                            size: 16,
+                                            color: Colors.amber,
+                                          );
+                                        }),
+                                      ),
+                                  ],
+                                ),
+                              );
+                            },
                           );
                         },
                       ),
                     ),
                     const SizedBox(height: 10),
-
                     // Rating stars row
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -152,25 +195,24 @@ class _CommentPageState extends State<CommentPage> {
                       }),
                     ),
                     const SizedBox(height: 10),
-
                     // Comment input
                     Row(
                       children: [
                         Expanded(
                           child: Container(
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
+                              color: buttonTextColor.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: TextField(
                               controller: _commentController,
-                              style: const TextStyle(color: Colors.white),
+                              style: TextStyle(color: buttonTextColor),
                               decoration: const InputDecoration(
                                 hintText: "Type your comment...",
                                 hintStyle: TextStyle(color: Colors.white70),
                                 border: InputBorder.none,
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 12),
+                                contentPadding:
+                                EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               ),
                             ),
                           ),
@@ -180,7 +222,7 @@ class _CommentPageState extends State<CommentPage> {
                           onTap: _submitComment,
                           child: CircleAvatar(
                             backgroundColor: Colors.blue,
-                            child: const Icon(Icons.arrow_forward, color: Colors.white),
+                            child: Icon(Icons.arrow_forward, color: buttonTextColor),
                           ),
                         ),
                       ],
@@ -195,9 +237,9 @@ class _CommentPageState extends State<CommentPage> {
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: CircleAvatar(
-                backgroundColor: Colors.white,
+                backgroundColor: buttonTextColor,
                 child: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Color(0xFF160948)),
+                  icon: Icon(Icons.arrow_back, color: containerColor),
                   onPressed: () => Navigator.pop(context),
                 ),
               ),
