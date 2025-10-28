@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "1055428545884",
+    "firebase_url": "https://app10-db6bc-default-rtdb.firebaseio.com",
+    "project_id": "app10-db6bc",
+    "storage_bucket": "app10-db6bc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1055428545884:android:d5a27a0c3e47a7b3e44599",
+        "android_client_info": {
+          "package_name": "com.company.app10"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlw1d4vLuJvPClvh2vl6zGDBMqAKKbOpE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1055428545884:android:fd9872e7ce29aa1ce44599",
+        "android_client_info": {
+          "package_name": "com.example.app10"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlw1d4vLuJvPClvh2vl6zGDBMqAKKbOpE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
