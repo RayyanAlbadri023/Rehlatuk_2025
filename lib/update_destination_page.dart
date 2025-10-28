@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'destination_service.dart';
-import 'destination_model.dart';
+import 'destination_list_page.dart';
+import 'admin_home_page.dart';
 
 class UpdateDestinationPage extends StatefulWidget {
   final Destination destination;
@@ -14,9 +14,9 @@ class UpdateDestinationPage extends StatefulWidget {
 
 class _UpdateDestinationPageState extends State<UpdateDestinationPage> {
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _nameController;
-  late TextEditingController _locationController;
-  late TextEditingController _overviewController;
+  late final TextEditingController _nameController;
+  late final TextEditingController _locationController;
+  late final TextEditingController _overviewController;
 
   File? _selectedPhotoFile;
   final ImagePicker _picker = ImagePicker();
@@ -29,70 +29,119 @@ class _UpdateDestinationPageState extends State<UpdateDestinationPage> {
     _overviewController = TextEditingController(text: widget.destination.overview);
   }
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _locationController.dispose();
+    _overviewController.dispose();
+    super.dispose();
+  }
+
   void _pickImage() async {
-    final XFile? pickedFile =
-    await _picker.pickImage(source: ImageSource.gallery, maxWidth: 600);
+    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 600);
     if (pickedFile != null) {
-      setState(() {
-        _selectedPhotoFile = File(pickedFile.path);
-      });
+      setState(() => _selectedPhotoFile = File(pickedFile.path));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('New image selected.')));
     }
   }
 
-  void _handleUpdate() async {
+  void _handleUpdate() {
     if (_formKey.currentState?.validate() ?? false) {
-      final updated = widget.destination.copyWith(
+      String updatedImageUrl = _selectedPhotoFile?.path ?? widget.destination.imageUrl;
+
+      final updatedDestination = Destination(
+        id: widget.destination.id,
         name: _nameController.text.trim(),
         location: _locationController.text.trim(),
         overview: _overviewController.text.trim(),
+        imageUrl: updatedImageUrl,
       );
-      await destinationService.updateDestination(updated, _selectedPhotoFile);
-      if (mounted) Navigator.of(context).pop();
+
+      destinationService.updateDestination(updatedDestination);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${updatedDestination.name} updated successfully!'), backgroundColor: Colors.green),
+      );
+
+      Navigator.of(context).pop();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please correct the validation errors.'), backgroundColor: Colors.red),
+      );
     }
+  }
+
+  Widget _imagePreviewWidget() {
+    if (_selectedPhotoFile != null) return Image.file(_selectedPhotoFile!, width: 100, height: 100, fit: BoxFit.cover);
+    return Image.network(widget.destination.imageUrl, width: 100, height: 100, fit: BoxFit.cover, errorBuilder: (c, e, s) => Container(width: 100, height: 100, color: Colors.grey.shade300, child: const Icon(Icons.image_not_supported, color: Colors.grey)));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Update Destination")),
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.business_center, color: Color(0xFF004683), size: 18),
+            label: const Text('Home', style: TextStyle(color: Color(0xFF004683))),
+            onPressed: () {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const AdminHomePage()),
+                    (route) => false,
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+        title: const Text('Update Destination', style: TextStyle(color: Color(0xFF333333))),
+      ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(24),
         child: Form(
           key: _formKey,
-          child: Column(
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: "Name"),
-                validator: (v) => v!.isEmpty ? "Required" : null,
-              ),
-              TextFormField(
-                controller: _locationController,
-                decoration: const InputDecoration(labelText: "Location"),
-                validator: (v) => v!.isEmpty ? "Required" : null,
-              ),
-              TextFormField(
-                controller: _overviewController,
-                decoration: const InputDecoration(labelText: "Overview"),
-                maxLines: 4,
-                validator: (v) => v!.isEmpty ? "Required" : null,
-              ),
-              const SizedBox(height: 16),
-              InkWell(
-                onTap: _pickImage,
-                child: Container(
-                  width: 100,
-                  height: 100,
-                  color: Colors.grey[300],
-                  child: _selectedPhotoFile != null
-                      ? Image.file(_selectedPhotoFile!, fit: BoxFit.cover)
-                      : Image.network(widget.destination.imageUrl, fit: BoxFit.cover),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton(onPressed: _handleUpdate, child: const Text("Update")),
-            ],
-          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const SizedBox(height: 16),
+            const Text('Update Destination', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF004683))),
+            const SizedBox(height: 30),
+
+            // Name
+            const Text('Destination name:', style: TextStyle(fontSize: 16, color: Color(0xFF004683))),
+            const SizedBox(height: 8),
+            TextFormField(controller: _nameController, decoration: InputDecoration(fillColor: Colors.grey.shade200, filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)), validator: (v) => (v == null || v.isEmpty) ? 'Destination name is required.' : null),
+            const SizedBox(height: 20),
+
+            // Location
+            const Text('Location:', style: TextStyle(fontSize: 16, color: Color(0xFF004683))),
+            const SizedBox(height: 8),
+            TextFormField(controller: _locationController, decoration: InputDecoration(fillColor: Colors.grey.shade200, filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)), validator: (v) => (v == null || v.isEmpty) ? 'Location is required.' : null),
+            const SizedBox(height: 20),
+
+            // Overview
+            const Text('Destination overview:', style: TextStyle(fontSize: 16, color: Color(0xFF004683))),
+            const SizedBox(height: 8),
+            TextFormField(controller: _overviewController, maxLines: 5, decoration: InputDecoration(fillColor: Colors.grey.shade200, filled: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)), validator: (v) => (v == null || v.isEmpty) ? 'Overview is required.' : null),
+            const SizedBox(height: 20),
+
+            // Image
+            const Text('Photo:', style: TextStyle(fontSize: 16, color: Color(0xFF004683))),
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: _pickImage,
+              borderRadius: BorderRadius.circular(10),
+              child: Container(width: 100, height: 100, decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFF5A8DBE), width: 2)), child: ClipRRect(borderRadius: BorderRadius.circular(10), child: _imagePreviewWidget())),
+            ),
+
+            const SizedBox(height: 50),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(onPressed: _handleUpdate, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5A8DBE), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text('Update', style: TextStyle(color: Colors.white, fontSize: 18))),
+            ),
+          ]),
         ),
       ),
     );

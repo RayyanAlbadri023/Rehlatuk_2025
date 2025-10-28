@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -7,7 +8,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:printing/printing.dart';
 import 'trip_pdf_generator.dart';
 import 'user_data.dart';
-import 'dart:typed_data';
 
 class AppStrings {
   static const Map<String, Map<String, String>> texts = {
@@ -25,6 +25,9 @@ class AppStrings {
       'invalidRanges': 'Please set valid start & end dates for all items',
       'generatingPdf': 'Generating PDF...',
       'outOfRange': 'Date must be within the selected trip range!',
+      'pdfSaved': 'PDF saved successfully!',
+      'pdfShared': 'PDF shared successfully!',
+      'error': 'Error generating PDF',
     },
     'ar': {
       'createTrip': 'إنشاء خطة الرحلة',
@@ -40,6 +43,9 @@ class AppStrings {
       'invalidRanges': 'يرجى تعيين تواريخ بداية ونهاية صحيحة لجميع العناصر',
       'generatingPdf': 'جارٍ إنشاء الـ PDF...',
       'outOfRange': 'التاريخ يجب أن يكون ضمن نطاق الرحلة المحدد!',
+      'pdfSaved': 'تم حفظ ملف PDF بنجاح!',
+      'pdfShared': 'تمت مشاركة ملف PDF بنجاح!',
+      'error': 'حدث خطأ أثناء إنشاء ملف PDF',
     },
   };
 
@@ -50,8 +56,8 @@ class AppStrings {
 
 class SelectDis extends StatefulWidget {
   final List<Map<String, dynamic>> cartItems;
-  final DateTime tripStart; // min date for all items
-  final DateTime tripEnd;   // max date for all items
+  final DateTime tripStart;
+  final DateTime tripEnd;
 
   const SelectDis({
     super.key,
@@ -71,6 +77,8 @@ class _SelectDisState extends State<SelectDis> {
   final Map<int, DateTime?> _endDates = {};
   final DateFormat _displayFormat = DateFormat('dd/MM/yyyy');
 
+  bool get isArabic => currentLanguage == "Arabic";
+
   @override
   void initState() {
     super.initState();
@@ -85,20 +93,18 @@ class _SelectDisState extends State<SelectDis> {
     });
   }
 
-  bool get isArabic => currentLanguage == "Arabic";
-
   bool _hasAllValidRanges() {
     for (int i = 0; i < widget.cartItems.length; i++) {
       final s = _startDates[i];
       final e = _endDates[i];
-      if (s == null || e == null) return false;
-      if (e.isBefore(s)) return false;
+      if (s == null || e == null || e.isBefore(s)) return false;
     }
     return true;
   }
 
   Future<void> _pickStartDate(BuildContext context, int index) async {
     final initial = _startDates[index] ?? widget.tripStart;
+
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
@@ -107,24 +113,24 @@ class _SelectDisState extends State<SelectDis> {
       locale: isArabic ? const Locale('ar') : const Locale('en'),
     );
 
-    if (picked != null) {
-      if (picked.isBefore(widget.tripStart) || picked.isAfter(widget.tripEnd)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppStrings.get('outOfRange', isArabic))),
-        );
-        return;
-      }
-      setState(() {
-        _startDates[index] = picked;
-        final end = _endDates[index];
-        if (end != null && end.isBefore(picked)) _endDates[index] = null;
-      });
+    if (picked == null) return;
+
+    if (picked.isBefore(widget.tripStart) || picked.isAfter(widget.tripEnd)) {
+      _showSnack(AppStrings.get('outOfRange', isArabic));
+      return;
     }
+
+    setState(() {
+      _startDates[index] = picked;
+      final end = _endDates[index];
+      if (end != null && end.isBefore(picked)) _endDates[index] = null;
+    });
   }
 
   Future<void> _pickEndDate(BuildContext context, int index) async {
     final start = _startDates[index] ?? widget.tripStart;
     final initial = _endDates[index] ?? start.add(const Duration(days: 1));
+
     final picked = await showDatePicker(
       context: context,
       initialDate: initial,
@@ -133,17 +139,85 @@ class _SelectDisState extends State<SelectDis> {
       locale: isArabic ? const Locale('ar') : const Locale('en'),
     );
 
-    if (picked != null) {
-      if (picked.isBefore(widget.tripStart) || picked.isAfter(widget.tripEnd)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(AppStrings.get('outOfRange', isArabic))),
-        );
-        return;
-      }
-      setState(() {
-        _endDates[index] = picked;
+    if (picked == null) return;
+
+    if (picked.isBefore(widget.tripStart) || picked.isAfter(widget.tripEnd)) {
+      _showSnack(AppStrings.get('outOfRange', isArabic));
+      return;
+    }
+
+    setState(() => _endDates[index] = picked);
+  }
+
+  Future<void> _onApplyNow() async {
+    if (!_hasAllValidRanges()) {
+      _showSnack(AppStrings.get('invalidRanges', isArabic));
+      return;
+    }
+
+    setState(() => _isGenerating = true);
+
+    final itemsForPdf = <Map<String, dynamic>>[];
+    for (int i = 0; i < widget.cartItems.length; i++) {
+      final item = widget.cartItems[i];
+      itemsForPdf.add({
+        'name': _displayNameFor(item),
+        'startDate': _startDates[i],
+        'endDate': _endDates[i],
+        'image': item['image'] ?? item['path'],
       });
     }
+
+    try {
+      _showSnack(AppStrings.get('generatingPdf', isArabic));
+
+      final pdfBytes = await generateTripPlanPdfBytes(itemsForPdf);
+
+      final savedFile = await _savePdfToDownloads(pdfBytes, 'trip_plan.pdf');
+      await Printing.sharePdf(bytes: Uint8List.fromList(pdfBytes), filename: 'trip_plan.pdf');
+
+      if (savedFile != null && savedFile.existsSync()) {
+        _showSnack(AppStrings.get('pdfSaved', isArabic));
+      } else {
+        _showSnack(AppStrings.get('pdfShared', isArabic));
+      }
+    } catch (e) {
+      _showSnack('${AppStrings.get('error', isArabic)}: $e');
+    } finally {
+      if (mounted) setState(() => _isGenerating = false);
+    }
+  }
+
+  // ✅ حفظ PDF بطريقة آمنة لجميع الأجهزة
+  Future<File?> _savePdfToDownloads(List<int> pdfBytes, String fileName) async {
+    try {
+      Directory? dir;
+
+      if (Platform.isAndroid) {
+        final status = await Permission.storage.request();
+        if (!status.isGranted) return null;
+
+        // استخدام مجلد خارجي آمن (Scoped Storage)
+        dir = await getExternalStorageDirectory();
+        if (dir == null) return null;
+
+        final file = File('${dir.path}/$fileName');
+        await file.writeAsBytes(pdfBytes, flush: true);
+        return file;
+      } else {
+        final docDir = await getApplicationDocumentsDirectory();
+        final file = File('${docDir.path}/$fileName');
+        await file.writeAsBytes(pdfBytes, flush: true);
+        return file;
+      }
+    } catch (e) {
+      print('Error saving PDF: $e');
+      return null;
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   String _displayNameFor(Map<String, dynamic> item) {
@@ -155,99 +229,12 @@ class _SelectDisState extends State<SelectDis> {
         .toString();
   }
 
-  Future<File?> _savePdfToDownloads(List<int> pdfBytes, String fileName) async {
-    try {
-      if (Platform.isAndroid) {
-        final status = await Permission.storage.request();
-        if (!status.isGranted) return null;
-
-        final downloadsDir = Directory('/storage/emulated/0/Download');
-        if (!downloadsDir.existsSync()) downloadsDir.createSync(recursive: true);
-
-        final file = File('${downloadsDir.path}/$fileName');
-        await file.writeAsBytes(pdfBytes, flush: true);
-        return file;
-      } else {
-        final dir = await getApplicationDocumentsDirectory();
-        final file = File('${dir.path}/$fileName');
-        await file.writeAsBytes(pdfBytes, flush: true);
-        return file;
-      }
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<void> _onApplyNow() async {
-    if (!_hasAllValidRanges()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.get('invalidRanges', isArabic))),
-      );
-      return;
-    }
-
-    setState(() {
-      _isGenerating = true;
-    });
-
-    final List<Map<String, dynamic>> itemsForPdf = [];
-    for (int i = 0; i < widget.cartItems.length; i++) {
-      final item = widget.cartItems[i];
-      final s = _startDates[i]!;
-      final e = _endDates[i]!;
-      itemsForPdf.add({
-        'name': _displayNameFor(item),
-        'startDate': s,
-        'endDate': e,
-        'image': item['image'] ?? item['path'],
-      });
-    }
-
-    try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppStrings.get('generatingPdf', isArabic))),
-      );
-
-      List<int> pdfBytes = await generateTripPlanPdfBytes(
-          itemsForPdf, locale: isArabic ? 'ar' : 'en');
-
-      File? file = await _savePdfToDownloads(pdfBytes, 'trip_plan.pdf');
-
-      Uint8List pdfData = Uint8List.fromList(pdfBytes);
-
-      await Printing.sharePdf(bytes: pdfData, filename: 'trip_plan.pdf');
-
-      if (file != null && file.existsSync()) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(Platform.isAndroid
-                  ? 'PDF saved to Downloads!'
-                  : 'PDF saved in app documents!')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF shared successfully!')),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error generating PDF: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isGenerating = false;
-        });
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final containerColor = isDark ? const Color(0xFF160948) : Colors.white;
-    final buttonTextColor = isDark ? Colors.white : const Color(0xFF160948);
+    final textColor = isDark ? Colors.white : const Color(0xFF160948);
 
     return Directionality(
       textDirection: isArabic ? ui.TextDirection.rtl : ui.TextDirection.ltr,
@@ -257,10 +244,7 @@ class _SelectDisState extends State<SelectDis> {
           backgroundColor: containerColor,
           title: Text(
             AppStrings.get('createTrip', isArabic),
-            style: TextStyle(
-              color: buttonTextColor,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
           ),
           centerTitle: true,
         ),
@@ -270,7 +254,7 @@ class _SelectDisState extends State<SelectDis> {
               ? Center(
             child: Text(
               AppStrings.get('noPlacesLeft', isArabic),
-              style: TextStyle(color: buttonTextColor, fontSize: 18),
+              style: TextStyle(color: textColor, fontSize: 18),
             ),
           )
               : Column(
@@ -288,7 +272,7 @@ class _SelectDisState extends State<SelectDis> {
                     return Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: buttonTextColor,
+                        color: textColor,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -308,14 +292,14 @@ class _SelectDisState extends State<SelectDis> {
                               Expanded(
                                 child: GestureDetector(
                                   onTap: () => _pickStartDate(context, index),
-                                  child: _buildDateBox('start', start, isArabic),
+                                  child: _buildDateBox('start', start),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: GestureDetector(
                                   onTap: () => _pickEndDate(context, index),
-                                  child: _buildDateBox('end', end, isArabic),
+                                  child: _buildDateBox('end', end),
                                 ),
                               ),
                             ],
@@ -326,18 +310,19 @@ class _SelectDisState extends State<SelectDis> {
                   },
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               ElevatedButton(
                 onPressed: _isGenerating ? null : _onApplyNow,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _isGenerating ? Colors.grey : buttonTextColor,
+                  backgroundColor: _isGenerating ? Colors.grey : textColor,
                   padding: const EdgeInsets.symmetric(horizontal: 50, vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(40),
                   ),
                 ),
                 child: _isGenerating
-                    ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                    ? const CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2)
                     : Text(
                   AppStrings.get('applyNow', isArabic),
                   style: TextStyle(
@@ -354,11 +339,11 @@ class _SelectDisState extends State<SelectDis> {
     );
   }
 
-  Widget _buildDateBox(String key, DateTime? date, bool isArabic) {
+  Widget _buildDateBox(String key, DateTime? date) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final containerColor = isDark ? const Color(0xFF160948) : Colors.white;
-    final buttonTextColor = isDark ? Colors.white : const Color(0xFF160948);
+    final textColor = isDark ? Colors.white : const Color(0xFF160948);
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
@@ -371,13 +356,13 @@ class _SelectDisState extends State<SelectDis> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(AppStrings.get(key, isArabic),
-              style: TextStyle(color: buttonTextColor, fontSize: 12)),
+              style: TextStyle(color: textColor, fontSize: 12)),
           const SizedBox(height: 6),
           Text(
             date != null
                 ? _displayFormat.format(date)
                 : AppStrings.get('pick${key[0].toUpperCase()}${key.substring(1)}', isArabic),
-            style: TextStyle(color: buttonTextColor, fontSize: 14),
+            style: TextStyle(color: textColor, fontSize: 14),
           ),
         ],
       ),
